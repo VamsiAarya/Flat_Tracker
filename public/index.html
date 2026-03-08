@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TNGO Roomies</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060608;
+    --surface: #0e0d14;
+    --card: #131220;
+    --card2: #1a1828;
+    --accent1: #ff5577;
+    --accent2: #ffcc00;
+    --accent3: #00e676;
+    --accent4: #7c6af7;
+    --text: #f0eeff;
+    --muted: #6b6880;
+    --border: rgba(255,255,255,0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    background-image: 
+      radial-gradient(ellipse at 15% 15%, rgba(124,106,247,0.12) 0%, transparent 50%),
+      radial-gradient(ellipse at 85% 85%, rgba(0,230,118,0.07) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 0%, rgba(255,85,119,0.06) 0%, transparent 40%);
+  }
+
+  .page-header { text-align: center; padding: 36px 20px 0; }
+  .page-header h1 { font-family: 'Playfair Display', serif; font-size: clamp(1.8rem, 5vw, 3rem); color: var(--text); line-height: 1.2; margin-bottom: 8px; }
+  .page-header p { color: var(--muted); font-size: 0.9rem; font-weight: 300; margin-bottom: 28px; }
+
+  .today-highlight { max-width: 1200px; margin: 0 auto 28px; background: linear-gradient(135deg, rgba(124,106,247,0.1), rgba(0,230,118,0.07)); border: 1px solid rgba(124,106,247,0.25); border-radius: 16px; padding: 20px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; box-shadow: 0 4px 24px rgba(124,106,247,0.08); }
+  .th-icon { font-size: 1.8rem; flex-shrink: 0; }
+  .th-content { flex: 1; min-width: 0; }
+  .th-label { font-size: 0.68rem; letter-spacing: 2px; color: var(--accent3); text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+  .th-title { font-family: 'Playfair Display', serif; font-size: 1.05rem; color: var(--text); line-height: 1.4; }
+  .th-names { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .th-chip { padding: 5px 16px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+  .th-chip.cooking { background: rgba(255,85,119,0.18); color: #ff7799; border: 1px solid rgba(255,85,119,0.3); }
+  .th-chip.cleaning { background: rgba(124,106,247,0.18); color: #a89fff; border: 1px solid rgba(124,106,247,0.3); }
+
+  .tab-bar { display: flex; justify-content: center; gap: 0; margin: 0 auto 36px; max-width: 420px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 5px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+  .tab-btn { flex: 1; padding: 12px 20px; border: none; background: transparent; color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 0.88rem; font-weight: 600; border-radius: 12px; cursor: pointer; transition: all 0.25s; display: flex; align-items: center; justify-content: center; gap: 7px; letter-spacing: 0.02em; }
+  .tab-btn.active { background: linear-gradient(135deg, rgba(124,106,247,0.3), rgba(0,230,118,0.15)); color: var(--text); border: 1px solid rgba(124,106,247,0.35); box-shadow: 0 2px 16px rgba(124,106,247,0.2); }
+  .tab-btn:not(.active):hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+  .tab-panel { display: none; padding: 0 20px 60px; }
+  .tab-panel.active { display: block; }
+
+  .week-selector { display: flex; gap: 14px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap; }
+  .week-card { flex: 1; max-width: 240px; min-width: 160px; background: var(--card); border: 2px solid var(--border); border-radius: 16px; padding: 18px 20px; text-align: center; cursor: pointer; transition: all 0.25s; position: relative; overflow: hidden; }
+  .week-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(124,106,247,0.15), rgba(0,230,118,0.08)); opacity: 0; transition: opacity 0.25s; }
+  .week-card.active::before { opacity: 1; }
+  .week-card.active { border-color: var(--accent4); box-shadow: 0 0 0 1px rgba(124,106,247,0.25), 0 8px 30px rgba(124,106,247,0.2); }
+  .week-card:hover:not(.active) { border-color: rgba(255,255,255,0.15); transform: translateY(-2px); }
+  .week-card-label { font-size: 0.65rem; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; position: relative; }
+  .week-card-num { font-family: 'Playfair Display', serif; font-size: 2.2rem; color: var(--text); line-height: 1; position: relative; }
+  .week-card.active .week-card-num { color: var(--accent4); }
+  .week-card-sub { font-size: 0.72rem; color: var(--muted); margin-top: 6px; position: relative; }
+  .week-card.active .week-card-sub { color: var(--accent4); }
+  .current-week-pill { display: inline-block; background: rgba(124,106,247,0.2); color: var(--accent4); border: 1px solid rgba(124,106,247,0.35); border-radius: 999px; font-size: 0.62rem; font-weight: 600; letter-spacing: 1px; padding: 2px 10px; margin-top: 8px; position: relative; animation: pulse 2s ease-in-out infinite; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+  .legend { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-bottom: 28px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-cooking { background: var(--accent1); }
+  .dot-cleaning { background: var(--accent2); }
+  .dot-rest { background: #3a3854; }
+
+  .week-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; max-width: 1200px; margin: 0 auto; }
+  .day-card { background: var(--card2); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
+  .day-card:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+  .today-card { border-color: rgba(0,230,118,0.5) !important; box-shadow: 0 0 0 1px rgba(0,230,118,0.25), 0 8px 30px rgba(0,230,118,0.1); }
+  .today-card .day-header { background: linear-gradient(135deg, rgba(0,230,118,0.12), rgba(0,230,118,0.03)) !important; }
+  .today-card .day-name { color: #00e676; }
+  .day-header { padding: 14px 18px; background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .day-name { font-family: 'Playfair Display', serif; font-size: 1.2rem; }
+  .day-num { color: var(--muted); font-size: 0.78rem; font-weight: 300; }
+  .today-badge { background: rgba(0,230,118,0.15); color: #00e676; border: 1px solid rgba(0,230,118,0.35); padding: 3px 10px; border-radius: 999px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; animation: pulse 2s ease-in-out infinite; }
+  .tasks-section { padding: 14px 18px; }
+  .task-group { margin-bottom: 12px; }
+  .task-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 7px; display: flex; align-items: center; gap: 5px; }
+  .task-label.cooking { color: var(--accent1); }
+  .task-label.cleaning { color: var(--accent2); }
+  .task-label.rest { color: var(--muted); }
+  .task-icon { font-size: 0.85rem; }
+  .members { display: flex; gap: 7px; flex-wrap: wrap; }
+  .member-chip { padding: 4px 12px; border-radius: 999px; font-size: 0.8rem; font-weight: 500; }
+  .chip-cooking { background: rgba(255,85,119,0.12); color: #ff7799; border: 1px solid rgba(255,85,119,0.22); }
+  .chip-cleaning { background: rgba(124,106,247,0.12); color: #a89fff; border: 1px solid rgba(124,106,247,0.22); }
+  .chip-rest { background: rgba(58,56,84,0.6); color: #6e6c8a; border: 1px solid rgba(255,255,255,0.05); }
+
+  .summary { max-width: 1200px; margin: 32px auto 0; background: var(--card2); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  .summary h2 { font-family: 'Playfair Display', serif; font-size: 1.3rem; margin-bottom: 18px; color: var(--accent4); }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .summary-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+  .summary-card .name { font-size: 0.88rem; font-weight: 500; margin-bottom: 7px; }
+  .summary-counts { display: flex; justify-content: center; gap: 8px; font-size: 0.73rem; }
+  .count-badge { padding: 3px 10px; border-radius: 999px; }
+  .cooking-badge { background: rgba(255,85,119,0.15); color: #ff7799; }
+  .cleaning-badge { background: rgba(124,106,247,0.12); color: #a89fff; }
+  .rest-badge { background: rgba(255,255,255,0.05); color: var(--muted); }
+
+  .queue-section { max-width: 640px; margin: 0 auto; }
+  .q-current-card { background: var(--card); border: 2px solid var(--accent4); border-radius: 16px; padding: 32px 24px; text-align: center; margin-bottom: 14px; position: relative; box-shadow: 0 0 40px rgba(124,106,247,0.15); }
+  .q-current-card::before { content: 'NOW'; position: absolute; top: 14px; left: 20px; font-size: 0.68rem; letter-spacing: 3px; color: var(--accent4); font-weight: 600; }
+  .q-current-num { font-family: 'Playfair Display', serif; font-size: clamp(4rem, 14vw, 7rem); line-height: 1; color: var(--accent4); animation: qpulse 2s ease-in-out infinite; }
+  @keyframes qpulse { 0%,100%{ text-shadow: 0 0 30px rgba(124,106,247,0.25); } 50% { text-shadow: 0 0 70px rgba(124,106,247,0.7); } }
+  .q-current-name { font-family: 'Playfair Display', serif; font-size: clamp(1.5rem, 5vw, 2.2rem); color: var(--text); margin-top: 4px; }
+
+  .q-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+  .q-item { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; transition: all 0.25s; }
+  .q-item.qi-active { border-color: var(--accent4); background: rgba(124,106,247,0.07); }
+  .q-item.qi-done { opacity: 0.4; border-color: transparent; }
+  .q-item.qi-upcoming { opacity: 0.65; }
+  .q-item.qi-skipped { border-color: var(--accent1); background: rgba(255,107,107,0.05); opacity:1; }
+  .q-item-num { font-family: 'Playfair Display', serif; font-size: 1.3rem; color: var(--muted); width: 26px; flex-shrink: 0; }
+  .q-item.qi-active .q-item-num { color: var(--accent4); }
+  .q-item.qi-skipped .q-item-num { color: var(--accent1); }
+  .q-item-info { flex: 1; }
+  .q-item-name { font-size: 0.9rem; font-weight: 500; }
+  .q-item-sub { font-size: 0.67rem; margin-top: 2px; }
+  .sub-done { color: var(--accent3); }
+  .sub-skipped { color: var(--accent1); }
+  .q-badge { font-size: 0.6rem; letter-spacing: 1.5px; padding: 3px 10px; border-radius: 999px; flex-shrink: 0; }
+  .badge-active { background: rgba(124,106,247,0.2); color: var(--accent4); }
+  .badge-done { background: rgba(255,255,255,0.05); color: var(--muted); }
+  .badge-waiting { border: 1px solid var(--border); color: var(--muted); }
+  .badge-skipped { background: rgba(255,107,107,0.18); color: var(--accent1); }
+  .badge-retry { background: rgba(255,107,107,0.18); color: var(--accent1); }
+
+  .q-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 28px; }
+  .q-controls button { font-family: 'DM Sans', sans-serif; font-size: 0.83rem; font-weight: 500; padding: 12px 18px; border-radius: 999px; border: none; cursor: pointer; transition: all 0.2s; }
+  .btn-q-done { background: rgba(124,106,247,0.18); color: var(--accent4); border: 1px solid rgba(124,106,247,0.3); flex: 2; }
+  .btn-q-done:hover { background: rgba(124,106,247,0.28); transform: translateY(-1px); }
+  .btn-q-skip { background: rgba(255,107,107,0.12); color: var(--accent1); border: 1px solid rgba(255,107,107,0.25); flex: 1; }
+  .btn-q-skip:hover { background: rgba(255,107,107,0.22); transform: translateY(-1px); }
+  .btn-q-undo { background: transparent; color: var(--muted); border: 1px solid var(--border); flex: 1; }
+  .btn-q-undo:hover { border-color: #aaa; color: #ccc; }
+  .btn-q-undo:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-q-reset { background: transparent; color: var(--muted); border: 1px solid var(--border); width: 100%; border-radius: 12px; }
+  .btn-q-reset:hover { border-color: var(--accent1); color: var(--accent1); }
+
+  .q-history-title { font-family: 'Playfair Display', serif; font-size: 1.1rem; color: var(--accent4); margin-bottom: 12px; }
+  .q-history-table { width: 100%; border-collapse: collapse; font-size: 0.77rem; margin-bottom: 40px; }
+  .q-history-table th { text-align: left; padding: 8px 12px; font-size: 0.63rem; letter-spacing: 2px; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 500; }
+  .q-history-table td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .q-history-table tr:last-child td { border-bottom: none; }
+  .qh-cycle { color: var(--accent4); font-family: 'Playfair Display', serif; font-size: 1rem; }
+  .qh-name { color: var(--text); }
+  .qh-date { color: var(--muted); font-size: 0.67rem; }
+  .qh-skip { color: var(--accent1); font-size: 0.67rem; font-style: italic; }
+  .qh-date-wrap { display: flex; align-items: center; gap: 6px; }
+  .qh-edit-btn { background: transparent; border: none; cursor: pointer; font-size: 0.75rem; opacity: 0.5; padding: 2px 4px; border-radius: 4px; transition: opacity 0.2s; line-height: 1; }
+  .qh-edit-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+  .qh-date-input { background: var(--card); border: 1px solid var(--accent4); border-radius: 6px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.75rem; padding: 3px 8px; outline: none; cursor: pointer; }
+  .qh-date-input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; }
+
+  .q-toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-90px); font-family: 'DM Sans', sans-serif; font-weight: 600; font-size: 0.88rem; letter-spacing: 0.04em; padding: 12px 28px; border-radius: 999px; transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1); z-index: 999; pointer-events: none; white-space: nowrap; }
+  .q-toast.show { transform: translateX(-50%) translateY(0); }
+  .q-toast.tgreen { background: var(--accent3); color: #000; }
+  .q-toast.tpurple { background: var(--accent4); color: #fff; }
+  .q-toast.torange { background: var(--accent1); color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>🏠 TNGO Roomies</h1>
+  <p>6 Members · Cooking Schedule & Turn Tracker</p>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('schedule')" id="tab-schedule">📅 Cooking Schedule</button>
+    <button class="tab-btn" onclick="switchTab('tracker')" id="tab-tracker">🔄 Turn Tracker</button>
+  </div>
+</div>
+
+<div style="padding: 0 20px;">
+  <div class="today-highlight" id="todayHighlight">
+    <div class="th-icon">🍳</div>
+    <div class="th-content">
+      <div class="th-label">Today's Duty</div>
+      <div class="th-title" id="thTitle">Loading...</div>
+      <div class="th-names" id="thNames"></div>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel active" id="panel-schedule">
+  <div class="week-selector" id="weekSelector"></div>
+  <div class="legend">
+    <div class="legend-item"><div class="dot dot-cooking"></div> Cooking</div>
+    <div class="legend-item"><div class="dot dot-cleaning"></div> House Cleaning + Dishes</div>
+    <div class="legend-item"><div class="dot dot-rest"></div> Rest Day</div>
+  </div>
+  <div class="week-grid" id="weekGrid"></div>
+  <div class="summary" id="summary">
+    <h2>📊 Weekly Task Summary</h2>
+    <div class="summary-grid" id="summaryGrid"></div>
+  </div>
+</div>
+
+<div class="tab-panel" id="panel-tracker">
+  <div class="queue-section">
+    <div style="text-align:center;margin-bottom:10px">
+      <span id="syncStatus" style="font-size:0.75rem;letter-spacing:1px;color:#a7a9be">⟳ Connecting...</span>
+    </div>
+    <div class="q-current-card">
+      <div class="q-current-num" id="qCurrentNum">1</div>
+      <div class="q-current-name" id="qCurrentName">Sahith</div>
+    </div>
+    <div class="q-list" id="qList"></div>
+    <div class="q-controls">
+      <button class="btn-q-done" onclick="qNext()">✓ Done — Next →</button>
+      <button class="btn-q-skip" onclick="qSkip()">✗ Skip</button>
+      <button class="btn-q-undo" id="qUndoBtn" onclick="qUndo()" disabled>↩ Undo</button>
+    </div>
+    <div id="qHistoryWrap" style="display:none">
+      <div class="q-history-title">📋 Completion History</div>
+      <table class="q-history-table">
+        <thead><tr><th>CYCLE</th><th>PERSON</th><th>COMPLETED AT</th></tr></thead>
+        <tbody id="qHistoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="q-toast" id="qToast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+  /* ── TAB SWITCHING ── */
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+    document.getElementById('todayHighlight').style.display = name === 'schedule' ? 'flex' : 'none';
+  }
+
+  /* ── SCHEDULE ── */
+  const members = ["Vamsi", "Bayalodu", "Deepak", "Sriman", "Mohan", "Sahith"];
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  const scheduleWeeks = [
+    [
+      { cooking: [0,1], cleaning: [2,3], rest: [4,5] },
+      { cooking: [2,4], cleaning: [0,5], rest: [1,3] },
+      { cooking: [3,5], cleaning: [1,4], rest: [0,2] },
+      { cooking: [0,1], cleaning: [3,5], rest: [2,4] },
+      { cooking: [2,3], cleaning: [0,4], rest: [1,5] },
+      { cooking: [4,5], cleaning: [2,3], rest: [0,1] },
+      { cooking: [0,4], cleaning: [1,5], rest: [2,3] },
+    ],
+    [
+      { cooking: [2,3], cleaning: [4,5], rest: [0,1] },
+      { cooking: [4,0], cleaning: [2,1], rest: [3,5] },
+      { cooking: [5,1], cleaning: [3,0], rest: [2,4] },
+      { cooking: [4,3], cleaning: [2,1], rest: [5,0] },
+      { cooking: [0,5], cleaning: [2,3], rest: [4,1] },
+      { cooking: [0,1], cleaning: [4,5], rest: [2,3] },
+      { cooking: [2,5], cleaning: [0,1], rest: [3,4] },
+    ]
+  ];
+
+  const anchorMonday = new Date('2026-03-02');
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const weeksSinceAnchor = Math.floor((today - anchorMonday) / msPerWeek);
+  const autoWeek = ((weeksSinceAnchor % 2) + 2) % 2;
+  const todayDayIdx = (today.getDay() + 6) % 7;
+  let currentWeek = autoWeek;
+
+  function buildTodayHighlight() {
+    const todayData = scheduleWeeks[autoWeek][todayDayIdx];
+    const todayStr = today.toLocaleDateString('en-IN', { weekday:'long', month:'long', day:'numeric' });
+    document.getElementById('thTitle').textContent = todayStr + ' · Week ' + (autoWeek+1);
+    const names = document.getElementById('thNames');
+    names.innerHTML = '';
+    todayData.cooking.forEach(m => {
+      const s = document.createElement('span');
+      s.className = 'th-chip cooking';
+      s.textContent = '🍳 ' + members[m];
+      names.appendChild(s);
+    });
+    todayData.cleaning.forEach(m => {
+      const s = document.createElement('span');
+      s.className = 'th-chip cleaning';
+      s.textContent = '🧹 ' + members[m];
+      names.appendChild(s);
+    });
+  }
+
+  function buildWeekSelector() {
+    const sel = document.getElementById('weekSelector');
+    sel.innerHTML = '';
+    ['Week 1', 'Week 2'].forEach((label, i) => {
+      const card = document.createElement('div');
+      card.className = 'week-card' + (i === currentWeek ? ' active' : '');
+      card.innerHTML = `
+        <div class="week-card-label">Cooking Schedule</div>
+        <div class="week-card-num">${i+1}</div>
+        <div class="week-card-sub">${i === autoWeek ? '<span class="current-week-pill">● Current Week</span>' : 'Alternate Week'}</div>
+      `;
+      card.onclick = () => {
+        currentWeek = i;
+        document.querySelectorAll('.week-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        renderSchedule(i);
+      };
+      sel.appendChild(card);
+    });
+  }
+
+  function renderSchedule(weekIdx) {
+    const schedule = scheduleWeeks[weekIdx];
+    const grid = document.getElementById('weekGrid');
+    grid.innerHTML = '';
+    schedule.forEach((day, i) => {
+      const isToday = (weekIdx === autoWeek) && (i === todayDayIdx);
+      const card = document.createElement('div');
+      card.className = 'day-card' + (isToday ? ' today-card' : '');
+      card.innerHTML = `
+        <div class="day-header">
+          <span class="day-name">${days[i]}</span>
+          <span class="day-num">${isToday ? '<span class="today-badge">TODAY</span>' : 'Day '+(i+1)}</span>
+        </div>
+        <div class="tasks-section">
+          <div class="task-group">
+            <div class="task-label cooking"><span class="task-icon">🍳</span> Cooking</div>
+            <div class="members">${day.cooking.map(m => `<span class="member-chip chip-cooking">${members[m]}</span>`).join('')}</div>
+          </div>
+          <div class="task-group">
+            <div class="task-label cleaning"><span class="task-icon">🧹</span> Cleaning + Dishes</div>
+            <div class="members">${day.cleaning.map(m => `<span class="member-chip chip-cleaning">${members[m]}</span>`).join('')}</div>
+          </div>
+          <div class="task-group">
+            <div class="task-label rest"><span class="task-icon">😴</span> Rest</div>
+            <div class="members">${day.rest.map(m => `<span class="member-chip chip-rest">${members[m]}</span>`).join('')}</div>
+          </div>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+    const counts = members.map(() => ({cooking:0, cleaning:0, rest:0}));
+    schedule.forEach(day => {
+      day.cooking.forEach(m => counts[m].cooking++);
+      day.cleaning.forEach(m => counts[m].cleaning++);
+      day.rest.forEach(m => counts[m].rest++);
+    });
+    document.getElementById('summaryGrid').innerHTML = members.map((name, i) => `
+      <div class="summary-card">
+        <div class="name">${name}</div>
+        <div class="summary-counts">
+          <span class="count-badge cooking-badge">🍳 ×${counts[i].cooking}</span>
+          <span class="count-badge cleaning-badge">🧹 ×${counts[i].cleaning}</span>
+          <span class="count-badge rest-badge">😴 ×${counts[i].rest}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  /* ── FIREBASE + TURN TRACKER ── */
+  const qPeople = ['Sahith','Sriman','Mohan','Vamsi','Deepak','Bayalodu'];
+  let qQueue = [], qDoneList = [], qCycle = 1, qLastDone = {}, qHistory = [], qUndoStack = [];
+  let qIsLoaded = false;
+
+  // ── CHANGE 1: Track last completed person name for WhatsApp Cloud Function ──
+  let _lastCompletedBy = '';
+
+  function setSyncStatus(status, color) {
+    const el = document.getElementById('syncStatus');
+    if (!el) return;
+    el.textContent = status;
+    el.style.color = color;
+  }
+
+  function qFmt(d) { return d.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'}); }
+
+  function qToast(msg, type='tgreen') {
+    const t = document.getElementById('qToast');
+    t.textContent = msg;
+    t.className = 'q-toast ' + type;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  function qFreshQueue() { return qPeople.map((name, i) => ({ name, idx: i, isRetry: false })); }
+
+  function qSave() {
+    qUndoStack.push({
+      queue:          JSON.parse(JSON.stringify(qQueue)),
+      doneList:       JSON.parse(JSON.stringify(qDoneList)),
+      cycle:          qCycle,
+      lastDone:       JSON.parse(JSON.stringify(qLastDone)),
+      history:        JSON.parse(JSON.stringify(qHistory)),
+      pendingSkipped: [...pendingSkipped],
+    });
+    document.getElementById('qUndoBtn').disabled = false;
+  }
+
+  function qUndo() {
+    if (!qUndoStack.length) return;
+    const prev = qUndoStack.pop();
+    qQueue         = JSON.parse(JSON.stringify(prev.queue));
+    qDoneList      = JSON.parse(JSON.stringify(prev.doneList));
+    qCycle         = prev.cycle;
+    qLastDone      = JSON.parse(JSON.stringify(prev.lastDone));
+    qHistory       = JSON.parse(JSON.stringify(prev.history));
+    pendingSkipped = new Set(prev.pendingSkipped || []);
+    document.getElementById('qUndoBtn').disabled = qUndoStack.length === 0;
+    qToast('↩ Last move undone', 'tgreen');
+    qRender();
+    saveToFirebase();
+  }
+
+  function qUpdateCard() {
+    if (!qQueue.length) return;
+    const cur = qQueue[0];
+    document.getElementById('qCurrentNum').textContent = qDoneList.length + 1;
+    document.getElementById('qCurrentName').textContent = cur.name + (cur.isRetry ? ' ↩' : '');
+  }
+
+  function qRenderList() {
+    const list = document.getElementById('qList');
+    list.innerHTML = '';
+    qPeople.forEach((name, i) => {
+      const isDone        = qDoneList.some(d => d.idx === i);
+      const isActive      = qQueue.length > 0 && qQueue[0].idx === i && !qQueue[0].isRetry;
+      const isActiveRetry = qQueue.length > 0 && qQueue[0].idx === i && qQueue[0].isRetry;
+      const isSkipped     = qQueue.some(q => q.idx === i && q.isRetry);
+
+      let cls = 'q-item', badgeCls = '', badgeTxt = '';
+      if (isActiveRetry)  { cls += ' qi-active';   badgeCls = 'badge-retry';   badgeTxt = 'RETRY'; }
+      else if (isActive)  { cls += ' qi-active';   badgeCls = 'badge-active';  badgeTxt = 'ACTIVE'; }
+      else if (isDone)    { cls += ' qi-done';     badgeCls = 'badge-done';    badgeTxt = 'DONE'; }
+      else if (isSkipped) { cls += ' qi-skipped';  badgeCls = 'badge-skipped'; badgeTxt = 'SKIPPED'; }
+      else                { cls += ' qi-upcoming'; badgeCls = 'badge-waiting'; badgeTxt = 'WAITING'; }
+
+      const lastStr  = qLastDone[i] ? `<div class="q-item-sub sub-done">✓ Last: ${qLastDone[i]}</div>` : '';
+      const skipNote = isSkipped    ? `<div class="q-item-sub sub-skipped">↩ Retrying after next</div>` : '';
+
+      const div = document.createElement('div');
+      div.className = cls;
+      div.innerHTML = `
+        <span class="q-item-num">${i+1}</span>
+        <div class="q-item-info"><div class="q-item-name">${name}</div>${lastStr}${skipNote}</div>
+        <span class="q-badge ${badgeCls}">${badgeTxt}</span>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function qRenderHistory() {
+    const wrap = document.getElementById('qHistoryWrap');
+    if (!qHistory.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    const tbody = document.getElementById('qHistoryBody');
+    tbody.innerHTML = '';
+    [...qHistory].reverse().forEach((h, displayIdx) => {
+      const realIdx = qHistory.length - 1 - displayIdx;
+      const tr = document.createElement('tr');
+      const nameCell = h.isRetry ? `${h.name} <span style="color:var(--accent1);font-size:0.65rem">(retry)</span>` : h.name;
+      let dateCell;
+      if (h.skipped) {
+        dateCell = `<span class="qh-skip">— skipped —</span>`;
+      } else {
+        const dateVal = h.completedAt ? new Date(h.completedAt).toISOString().split('T')[0] : '';
+        dateCell = `
+          <span class="qh-date-wrap">
+            <span class="qh-date" id="qhdate-${realIdx}">${h.completedAt}</span>
+            <input type="date" class="qh-date-input" id="qhinput-${realIdx}" value="${dateVal}" style="display:none" onchange="saveEditedDate(${realIdx}, this.value)">
+            <button class="qh-edit-btn" onclick="toggleDateEdit(${realIdx})" title="Edit date">✏️</button>
+          </span>`;
+      }
+      tr.innerHTML = `<td class="qh-cycle">${h.cycle}</td><td class="qh-name">${nameCell}</td><td>${dateCell}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function toggleDateEdit(idx) {
+    const span  = document.getElementById('qhdate-' + idx);
+    const input = document.getElementById('qhinput-' + idx);
+    if (input.style.display === 'none') {
+      span.style.display  = 'none';
+      input.style.display = 'inline-block';
+      input.focus();
+    } else {
+      span.style.display  = 'inline';
+      input.style.display = 'none';
+    }
+  }
+
+  function saveEditedDate(idx, value) {
+    if (!value) return;
+    const d = new Date(value + 'T00:00:00');
+    const formatted = d.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
+    qHistory[idx].completedAt = formatted;
+    const name = qHistory[idx].name;
+    const personIdx = qPeople.indexOf(name);
+    let latestIdx = -1;
+    qHistory.forEach((h, i) => { if (!h.skipped && qPeople.indexOf(h.name) === personIdx) latestIdx = i; });
+    if (latestIdx === idx) qLastDone[personIdx] = formatted;
+    qRender();
+    saveToFirebase();
+    qToast('📅 Date updated', 'tgreen');
+  }
+
+  function qRender() { qUpdateCard(); qRenderList(); qRenderHistory(); }
+
+  // ── CHANGE 2: saveToFirebase includes lastCompletedBy ──
+  async function saveToFirebase() {
+    if (!window._db) return;
+    try {
+      setSyncStatus('⟳ Syncing...', '#ffd93d');
+      await window._db.collection('tracker').doc('state').set({
+        queue:           JSON.stringify(qQueue),
+        doneList:        JSON.stringify(qDoneList),
+        cycle:           qCycle,
+        lastDone:        JSON.stringify(qLastDone),
+        history:         JSON.stringify(qHistory),
+        pendingSkipped:  JSON.stringify([...pendingSkipped]),
+        lastCompletedBy: _lastCompletedBy,   // ← triggers Cloud Function → WhatsApp broadcast
+        updatedAt:       new Date().toISOString()
+      });
+      setSyncStatus('✓ Synced', '#6bcb77');
+    } catch(e) {
+      setSyncStatus('✗ Sync failed', '#ff6b6b');
+      console.error(e);
+    }
+  }
+
+  function applyFirebaseState(data) {
+    if (!data) return;
+    try {
+      qQueue         = JSON.parse(data.queue         || '[]');
+      qDoneList      = JSON.parse(data.doneList      || '[]');
+      qCycle         = data.cycle                    || 1;
+      qLastDone      = JSON.parse(data.lastDone      || '{}');
+      qHistory       = JSON.parse(data.history       || '[]');
+      pendingSkipped = new Set(JSON.parse(data.pendingSkipped || '[]'));
+      // lastCompletedBy is write-only from client; Cloud Function reads it server-side
+    } catch(e) { console.error('Parse error', e); }
+    qRender();
+  }
+
+  let pendingSkipped = new Set();
+
+  function rebuildQueueWithPending(baseQueue) {
+    const result = [];
+    baseQueue.forEach(person => {
+      result.push(person);
+      pendingSkipped.forEach(idx => {
+        result.push({ name: qPeople[idx], idx, isRetry: true });
+      });
+    });
+    return result;
+  }
+
+  // ── CHANGE 3: qNext sets _lastCompletedBy before calling saveToFirebase ──
+  function qNext() {
+    if (!qQueue.length) return;
+    qSave();
+    const cur = qQueue.shift();
+    const str = qFmt(new Date());
+
+    if (cur.isRetry) {
+      pendingSkipped.delete(cur.idx);
+      qQueue = qQueue.filter(q => !(q.isRetry && q.idx === cur.idx));
+    }
+
+    qLastDone[cur.idx] = str;
+    qDoneList.push(cur);
+    qHistory.push({ cycle: qCycle, name: cur.name, completedAt: str, isRetry: cur.isRetry, skipped: false });
+
+    // ← Set who just completed so Cloud Function sends WhatsApp notification to all 6
+    _lastCompletedBy = cur.name;
+
+    const uniqueDone = new Set(qDoneList.map(d => d.idx));
+    if (uniqueDone.size >= qPeople.length) {
+      const done = qCycle++;
+      qDoneList = [];
+      pendingSkipped.clear();
+      qQueue = qFreshQueue();
+      qToast('✓ Cycle ' + done + ' complete — restarting!', 'tgreen');
+    } else {
+      const normalLeft = qQueue.filter(q => !q.isRetry);
+      if (normalLeft.length === 0 && pendingSkipped.size > 0) {
+        const alreadyInQueue = new Set(qQueue.map(q => q.idx));
+        pendingSkipped.forEach(idx => {
+          if (!alreadyInQueue.has(idx)) qQueue.push({ name: qPeople[idx], idx, isRetry: true });
+        });
+      }
+    }
+
+    qRender();
+    saveToFirebase();
+  }
+
+  function qSkip() {
+    if (!qQueue.length) return;
+    qSave();
+    const s = qQueue.shift();
+    qHistory.push({ cycle: qCycle, name: s.name, completedAt: null, isRetry: s.isRetry, skipped: true });
+    pendingSkipped.add(s.idx);
+    qQueue = qQueue.filter(q => !(q.isRetry && q.idx === s.idx));
+    const normalLeft = qQueue.filter(q => !q.isRetry);
+    if (normalLeft.length === 0 && qQueue.filter(q => q.isRetry).length === 0) {
+      const done = qCycle++;
+      qDoneList = [];
+      const fresh = qFreshQueue().filter(q => !pendingSkipped.has(q.idx));
+      qQueue = rebuildQueueWithPending(fresh);
+      qToast('✓ Cycle ' + done + ' complete — ' + pendingSkipped.size + ' person(s) carried over', 'tgreen');
+    } else if (normalLeft.length > 0) {
+      const nextNormalIdx = qQueue.findIndex(q => !q.isRetry);
+      qQueue.splice(nextNormalIdx + 1, 0, { ...s, isRetry: true });
+      qToast('⚠ ' + s.name + ' skipped — asking after every turn', 'torange');
+    } else {
+      qQueue.push({ ...s, isRetry: true });
+      qToast('⚠ ' + s.name + ' skipped — asking after every turn', 'torange');
+    }
+    qRender();
+    saveToFirebase();
+  }
+
+  function qReset() {
+    if (!confirm('Reset everything? This will clear all progress for everyone.')) return;
+    qQueue = qFreshQueue();
+    qDoneList = [];
+    qCycle = 1;
+    qLastDone = {};
+    qHistory = [];
+    qUndoStack = [];
+    pendingSkipped = new Set();
+    _lastCompletedBy = '';
+    document.getElementById('qUndoBtn').disabled = true;
+    qRender();
+    saveToFirebase();
+  }
+
+  /* ── INIT ── */
+  buildTodayHighlight();
+  buildWeekSelector();
+  renderSchedule(autoWeek);
+
+  function initFirebase() {
+    try {
+      const firebaseConfig = {
+        apiKey: "AIzaSyAh0ek-Q7Ax_u9wNi-dQQjLmC2NTzvfaMg",
+        authDomain: "flatactivityplanner.firebaseapp.com",
+        projectId: "flatactivityplanner",
+        storageBucket: "flatactivityplanner.firebasestorage.app",
+        messagingSenderId: "548574489399",
+        appId: "1:548574489399:web:720f146d2a6e3878b588b2",
+        measurementId: "G-XQJ80NL3DF"
+      };
+      firebase.initializeApp(firebaseConfig);
+      const db = firebase.firestore();
+      window._db = db;
+
+      db.collection('tracker').doc('state').onSnapshot((snap) => {
+        setSyncStatus('🔴 Live', '#6bcb77');
+        if (snap.exists) {
+          applyFirebaseState(snap.data());
+        } else {
+          qQueue = qFreshQueue();
+          qRender();
+          db.collection('tracker').doc('state').set({
+            queue:           JSON.stringify(qQueue),
+            doneList:        JSON.stringify([]),
+            cycle:           1,
+            lastDone:        JSON.stringify({}),
+            history:         JSON.stringify([]),
+            lastCompletedBy: '',
+            updatedAt:       new Date().toISOString()
+          });
+        }
+        qIsLoaded = true;
+      }, (err) => {
+        setSyncStatus('✗ Sync failed', '#ff6b6b');
+        qQueue = qFreshQueue();
+        qRender();
+        console.error(err);
+      });
+    } catch(e) {
+      setSyncStatus('✗ Error', '#ff6b6b');
+      qQueue = qFreshQueue();
+      qRender();
+      console.error(e);
+    }
+  }
+
+  window.addEventListener('load', initFirebase);
+</script>
+</body>
+</html>
