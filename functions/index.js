@@ -1,100 +1,111 @@
-const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onSchedule }        = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
-const { defineSecret } = require("firebase-functions/params");
-const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
-const twilio = require("twilio");
+const { defineSecret }      = require("firebase-functions/params");
+const { initializeApp }     = require("firebase-admin/app");
+const { getFirestore }      = require("firebase-admin/firestore");
+const https                 = require("https");
 
 initializeApp();
 const db = getFirestore();
 
-// ─── Secrets (stored in Google Secret Manager) ────────────────────────────────
-const TWILIO_ACCOUNT_SID   = defineSecret("TWILIO_ACCOUNT_SID");
-const TWILIO_AUTH_TOKEN    = defineSecret("TWILIO_AUTH_TOKEN");
-const TWILIO_WHATSAPP_FROM = defineSecret("TWILIO_WHATSAPP_FROM");
+// ─── Secrets ──────────────────────────────────────────────────────────────────
+const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
+const TELEGRAM_CHAT_ID   = defineSecret("TELEGRAM_CHAT_ID");
 
-// ─── Schedule Data (mirrors the HTML app exactly) ─────────────────────────────
+// ─── Schedule Data (mirrors HTML app — 3-week perfectly balanced) ─────────────
 const MEMBERS = ["Vamsi", "Baggu", "Deepak", "Sriman", "Mohan", "Sahith"];
+const DAYS    = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
 const SCHEDULE_WEEKS = [
-  [
-    { cooking: [0,1], cleaning: [2,3], rest: [4,5] },  // Mon
-    { cooking: [2,4], cleaning: [0,5], rest: [1,3] },  // Tue
-    { cooking: [3,5], cleaning: [1,4], rest: [0,2] },  // Wed
-    { cooking: [0,1], cleaning: [3,5], rest: [2,4] },  // Thu
-    { cooking: [2,3], cleaning: [0,4], rest: [1,5] },  // Fri
-    { cooking: [4,5], cleaning: [2,3], rest: [0,1] },  // Sat
-    { cooking: [0,4], cleaning: [1,5], rest: [2,3] },  // Sun
+  [ // Week 1
+    { cooking:[0,1], cleaning:[2,5], rest:[3,4] },
+    { cooking:[3,4], cleaning:[0,1], rest:[2,5] },
+    { cooking:[2,5], cleaning:[3,4], rest:[0,1] },
+    { cooking:[0,2], cleaning:[3,1], rest:[4,5] },
+    { cooking:[4,5], cleaning:[0,2], rest:[3,1] },
+    { cooking:[3,1], cleaning:[4,5], rest:[0,2] },
+    { cooking:[0,3], cleaning:[4,2], rest:[5,1] },
   ],
-  [
-    { cooking: [2,3], cleaning: [4,5], rest: [0,1] },  // Mon
-    { cooking: [4,0], cleaning: [2,1], rest: [3,5] },  // Tue
-    { cooking: [5,1], cleaning: [3,0], rest: [2,4] },  // Wed
-    { cooking: [4,3], cleaning: [2,1], rest: [5,0] },  // Thu
-    { cooking: [0,5], cleaning: [2,3], rest: [4,1] },  // Fri
-    { cooking: [0,1], cleaning: [4,5], rest: [2,3] },  // Sat
-    { cooking: [2,5], cleaning: [0,1], rest: [3,4] },  // Sun
-  ]
+  [ // Week 2
+    { cooking:[5,1], cleaning:[0,3], rest:[4,2] },
+    { cooking:[4,2], cleaning:[5,1], rest:[0,3] },
+    { cooking:[0,4], cleaning:[5,3], rest:[1,2] },
+    { cooking:[1,2], cleaning:[0,4], rest:[5,3] },
+    { cooking:[5,3], cleaning:[1,2], rest:[0,4] },
+    { cooking:[0,5], cleaning:[1,4], rest:[2,3] },
+    { cooking:[2,3], cleaning:[0,5], rest:[1,4] },
+  ],
+  [ // Week 3
+    { cooking:[1,4], cleaning:[2,3], rest:[0,5] },
+    { cooking:[0,1], cleaning:[2,5], rest:[3,4] },
+    { cooking:[3,4], cleaning:[0,1], rest:[2,5] },
+    { cooking:[2,5], cleaning:[3,4], rest:[0,1] },
+    { cooking:[0,2], cleaning:[3,1], rest:[4,5] },
+    { cooking:[4,5], cleaning:[0,2], rest:[3,1] },
+    { cooking:[3,1], cleaning:[4,5], rest:[0,2] },
+  ],
 ];
 
-// Anchor Monday — must match the HTML app
 const ANCHOR_MONDAY = new Date('2026-03-02T00:00:00.000Z');
 
-// Returns today's full schedule with member names
 function getTodaySchedule() {
-  const now = new Date();
-  // Get today's date in IST
-  const istString = now.toLocaleString("en-CA", { timeZone: "Asia/Kolkata" });
-  const todayIST = new Date(istString.split(",")[0] + "T00:00:00.000Z");
-
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-  const weeksSinceAnchor = Math.floor((todayIST - ANCHOR_MONDAY) / msPerWeek);
-  const weekIdx = ((weeksSinceAnchor % 2) + 2) % 2;
-
-  // JS getDay(): 0=Sun, 1=Mon ... convert to 0=Mon, 6=Sun
-  const jsDay = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getDay();
-  const dayIdx = (jsDay + 6) % 7;
-
-  const day = SCHEDULE_WEEKS[weekIdx][dayIdx];
-
+  const now     = new Date();
+  const istStr  = now.toLocaleString("en-CA", { timeZone: "Asia/Kolkata" });
+  const todayIST = new Date(istStr.split(",")[0] + "T00:00:00.000Z");
+  const msPerWeek   = 7 * 24 * 60 * 60 * 1000;
+  const msPer3Weeks = 3 * msPerWeek;
+  const msIntoCycle = ((todayIST - ANCHOR_MONDAY) % msPer3Weeks + msPer3Weeks) % msPer3Weeks;
+  const weekIdx  = Math.floor(msIntoCycle / msPerWeek);
+  const jsDay    = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getDay();
+  const dayIdx   = (jsDay + 6) % 7;
+  const day      = SCHEDULE_WEEKS[weekIdx][dayIdx];
   return {
     weekNum:  weekIdx + 1,
-    cooking:  day.cooking.map(i => MEMBERS[i]),
+    dayName:  DAYS[dayIdx],
+    cooking:  day.cooking.map(i  => MEMBERS[i]),
     cleaning: day.cleaning.map(i => MEMBERS[i]),
-    rest:     day.rest.map(i => MEMBERS[i]),
+    rest:     day.rest.map(i     => MEMBERS[i]),
   };
 }
 
 function getDutyLabel(cycleCount) {
-  const pattern = cycleCount % 3;
-  if (pattern === 0) return "🍳 Cooking";
-  if (pattern === 1) return "🧹 House Cleaning + Dishes";
+  const p = cycleCount % 3;
+  if (p === 0) return "🍳 Cooking";
+  if (p === 1) return "🧹 House Cleaning + Dishes";
   return "😴 Rest Day";
 }
 
-// ─── Fetch all roomies ─────────────────────────────────────────────────────────
-async function getMembers() {
-  const snapshot = await db.collection("roomies").get();
-  if (snapshot.empty) {
-    console.warn("⚠️ No documents found in roomies collection.");
-    return [];
-  }
-  const members = [];
-  snapshot.forEach((doc) => {
-    const data = doc.data();
-    if (data.name && data.mobile) {
-      if (data.notifications === false) {
-        console.log(`🔕 Skipping ${data.name} — notifications disabled.`);
-      } else {
-        // notifications: true OR field not set → defaults to receiving messages
-        members.push({ name: data.name, mobile: data.mobile });
-      }
-    } else {
-      console.warn(`⚠️ Doc ${doc.id} missing name or mobile — skipping.`);
-    }
+// ─── Send Telegram message ────────────────────────────────────────────────────
+function sendTelegram(token, chatId, text) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      chat_id:    chatId,
+      text:       text,
+      parse_mode: "Markdown",
+    });
+    const req = https.request({
+      hostname: "api.telegram.org",
+      path:     `/bot${token}/sendMessage`,
+      method:   "POST",
+      headers:  { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+    }, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        const parsed = JSON.parse(data);
+        if (parsed.ok) {
+          console.log("✅ Telegram message sent to chat", chatId);
+          resolve(parsed);
+        } else {
+          console.error("❌ Telegram error:", parsed);
+          reject(new Error(parsed.description));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
   });
-  console.log(`✅ Loaded ${members.length} members:`, members.map(m => m.name));
-  return members;
 }
 
 async function getCurrentState() {
@@ -102,90 +113,51 @@ async function getCurrentState() {
   return doc.exists ? doc.data() : null;
 }
 
-// ─── Broadcast to all members ──────────────────────────────────────────────────
-async function broadcastToAll(members, message, sid, token, from) {
-  const client = twilio(sid, token);
-
-  const results = await Promise.allSettled(
-    members.map((member) =>
-      client.messages.create({
-        from: `whatsapp:${from}`,
-        to:   `whatsapp:${member.mobile}`,
-        body: message,
-      })
-    )
-  );
-
-  results.forEach((result, i) => {
-    if (result.status === "rejected") {
-      console.error(`❌ Failed → ${members[i].name}:`, result.reason);
-    } else {
-      console.log(`✅ Sent → ${members[i].name}`);
-    }
-  });
-}
-
 // ─── 1. Daily Morning Reminder — 7:30 AM IST ──────────────────────────────────
 exports.dailyMorningReminder = onSchedule(
   {
     schedule: "30 7 * * *",
+    region:   "asia-south1",
     timeZone: "Asia/Kolkata",
-    secrets:  [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM],
+    secrets:  [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID],
   },
   async () => {
-    const members = await getMembers();
-    if (!members.length) {
-      console.error("❌ No members found.");
-      return;
-    }
-
-    // Get today's full schedule from the schedule table
     const schedule = getTodaySchedule();
-
-    const today = new Date().toLocaleDateString("en-IN", {
-      weekday: "long",
-      day:     "numeric",
-      month:   "long",
-      timeZone: "Asia/Kolkata",
+    const today    = new Date().toLocaleDateString("en-IN", {
+      weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Kolkata",
     });
 
-    // Build full schedule message
     const message =
       `🏠 *TNGO Roomies — Daily Reminder*\n\n` +
       `📅 *${today}* · Week ${schedule.weekNum}\n\n` +
       `🍳 *Cooking:* ${schedule.cooking.join(" & ")}\n` +
-      `🧹 *Cleaning + Dishes:* ${schedule.cleaning.join(" & ")}\n` +
+      `🧹 *Cleaning \\+ Dishes:* ${schedule.cleaning.join(" & ")}\n` +
       `😴 *Rest:* ${schedule.rest.join(" & ")}\n\n` +
-      `Open the app:\n` +
-      `https://flatactivityplanner.web.app/`;
+      `Open the app:\nhttps://flatactivityplanner.web.app/`;
 
-    console.log("📨 Sending message:\n", message);
-    await broadcastToAll(
-      members,
-      message,
-      TWILIO_ACCOUNT_SID.value(),
-      TWILIO_AUTH_TOKEN.value(),
-      TWILIO_WHATSAPP_FROM.value()
+    console.log("📨 Sending daily reminder:\n", message);
+
+    await sendTelegram(
+      TELEGRAM_BOT_TOKEN.value(),
+      TELEGRAM_CHAT_ID.value(),
+      message
     );
   }
 );
 
-// ─── 2. Notify all when someone marks duty as Done ────────────────────────────
+// ─── 2. Notify group when someone marks duty Done ─────────────────────────────
 exports.onDutyMarkedDone = onDocumentUpdated(
   {
     document: "tracker/state",
-    secrets:  [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM],
+    region:   "asia-south1",
+    secrets:  [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID],
   },
   async (event) => {
     const before = event.data.before.data();
     const after  = event.data.after.data();
 
-    // Only fire when lastCompletedBy actually changes (Done button was pressed)
     if (before.lastCompletedBy === after.lastCompletedBy) return;
     if (!after.lastCompletedBy) return;
-
-    const members = await getMembers();
-    if (!members.length) return;
 
     const completedBy = after.lastCompletedBy;
     const queue       = JSON.parse(after.queue || "[]");
@@ -193,16 +165,15 @@ exports.onDutyMarkedDone = onDocumentUpdated(
     const nextDuty    = getDutyLabel(after.cycleCount ?? 0);
 
     const message =
-      `🗑️ *${completedBy}* just emptied the dust bin!\n\n` +
-      `🔜 *Next up: ${nextPerson}*\n\n` +
+      `✅ *${completedBy}* just completed their duty\\!\n\n` +
+      `🔜 *Next up: ${nextPerson}*\n` +
+      `📌 Task: *${nextDuty}*\n\n` +
       `🏠 TNGO Roomies`;
 
-    await broadcastToAll(
-      members,
-      message,
-      TWILIO_ACCOUNT_SID.value(),
-      TWILIO_AUTH_TOKEN.value(),
-      TWILIO_WHATSAPP_FROM.value()
+    await sendTelegram(
+      TELEGRAM_BOT_TOKEN.value(),
+      TELEGRAM_CHAT_ID.value(),
+      message
     );
   }
 );
