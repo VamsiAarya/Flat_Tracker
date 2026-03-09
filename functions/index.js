@@ -17,46 +17,52 @@ const MEMBERS = ["Vamsi", "Baggu", "Deepak", "Sriman", "Mohan", "Sahith"];
 const DAYS    = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
 const SCHEDULE_WEEKS = [
-  [ // Week 1
-    { cooking:[0,1], cleaning:[2,5], rest:[3,4] },
-    { cooking:[3,4], cleaning:[0,1], rest:[2,5] },
-    { cooking:[2,5], cleaning:[3,4], rest:[0,1] },
-    { cooking:[0,2], cleaning:[3,1], rest:[4,5] },
-    { cooking:[4,5], cleaning:[0,2], rest:[3,1] },
-    { cooking:[3,1], cleaning:[4,5], rest:[0,2] },
-    { cooking:[0,3], cleaning:[4,2], rest:[5,1] },
+  [ // Week 1 — Easy week: Deepak & Sahith
+    { cooking:[0,1], cleaning:[2,3], rest:[4,5] },
+    { cooking:[2,3], cleaning:[4,5], rest:[0,1] },
+    { cooking:[4,5], cleaning:[0,1], rest:[2,3] },
+    { cooking:[0,2], cleaning:[4,3], rest:[1,5] },
+    { cooking:[1,5], cleaning:[0,2], rest:[4,3] },
+    { cooking:[4,3], cleaning:[1,5], rest:[0,2] },
+    { cooking:[0,4], cleaning:[1,3], rest:[2,5] },
   ],
-  [ // Week 2
-    { cooking:[5,1], cleaning:[0,3], rest:[4,2] },
-    { cooking:[4,2], cleaning:[5,1], rest:[0,3] },
-    { cooking:[0,4], cleaning:[5,3], rest:[1,2] },
-    { cooking:[1,2], cleaning:[0,4], rest:[5,3] },
-    { cooking:[5,3], cleaning:[1,2], rest:[0,4] },
-    { cooking:[0,5], cleaning:[1,4], rest:[2,3] },
-    { cooking:[2,3], cleaning:[0,5], rest:[1,4] },
+  [ // Week 2 — Easy week: Sriman & Mohan
+    { cooking:[0,2], cleaning:[1,4], rest:[3,5] },
+    { cooking:[1,4], cleaning:[3,5], rest:[0,2] },
+    { cooking:[3,5], cleaning:[0,2], rest:[1,4] },
+    { cooking:[1,3], cleaning:[2,5], rest:[0,4] },
+    { cooking:[2,5], cleaning:[0,4], rest:[1,3] },
+    { cooking:[0,4], cleaning:[1,3], rest:[2,5] },
+    { cooking:[1,2], cleaning:[0,5], rest:[3,4] },
   ],
-  [ // Week 3
-    { cooking:[1,4], cleaning:[2,3], rest:[0,5] },
-    { cooking:[0,1], cleaning:[2,5], rest:[3,4] },
-    { cooking:[3,4], cleaning:[0,1], rest:[2,5] },
-    { cooking:[2,5], cleaning:[3,4], rest:[0,1] },
-    { cooking:[0,2], cleaning:[3,1], rest:[4,5] },
-    { cooking:[4,5], cleaning:[0,2], rest:[3,1] },
-    { cooking:[3,1], cleaning:[4,5], rest:[0,2] },
+  [ // Week 3 — Easy week: Vamsi & Baggu
+    { cooking:[3,5], cleaning:[0,4], rest:[1,2] },
+    { cooking:[0,5], cleaning:[2,4], rest:[1,3] },
+    { cooking:[1,2], cleaning:[3,5], rest:[0,4] },
+    { cooking:[3,4], cleaning:[1,5], rest:[0,2] },
+    { cooking:[2,5], cleaning:[0,3], rest:[1,4] },
+    { cooking:[0,1], cleaning:[2,4], rest:[3,5] },
+    { cooking:[3,4], cleaning:[1,2], rest:[0,5] },
   ],
 ];
 
-const ANCHOR_MONDAY = new Date('2026-03-02T00:00:00.000Z');
+// Anchor in IST: 2026-03-02 00:00:00 IST = 2026-03-01T18:30:00.000Z
+const ANCHOR_MONDAY = new Date('2026-03-01T18:30:00.000Z');
 
 function getTodaySchedule() {
-  const now     = new Date();
-  const istStr  = now.toLocaleString("en-CA", { timeZone: "Asia/Kolkata" });
-  const todayIST = new Date(istStr.split(",")[0] + "T00:00:00.000Z");
+  const now = new Date();
+
+  // Get current date components in IST
+  const istDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const y = istDate.getFullYear(), m = istDate.getMonth(), d = istDate.getDate();
+
+  // IST midnight expressed in UTC (IST = UTC+5:30, so subtract 5.5 hours)
+  const todayIST    = new Date(Date.UTC(y, m, d) - 5.5 * 60 * 60 * 1000);
   const msPerWeek   = 7 * 24 * 60 * 60 * 1000;
   const msPer3Weeks = 3 * msPerWeek;
   const msIntoCycle = ((todayIST - ANCHOR_MONDAY) % msPer3Weeks + msPer3Weeks) % msPer3Weeks;
   const weekIdx  = Math.floor(msIntoCycle / msPerWeek);
-  const jsDay    = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getDay();
+  const jsDay    = istDate.getDay();
   const dayIdx   = (jsDay + 6) % 7;
   const day      = SCHEDULE_WEEKS[weekIdx][dayIdx];
   return {
