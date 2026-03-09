@@ -151,7 +151,7 @@ exports.dailyMorningReminder = onSchedule(
   }
 );
 
-// ─── 2. Notify group when someone marks duty Done ─────────────────────────────
+// ─── 2. Notify group when someone marks dustbin duty Done (max 1 per day) ─────
 exports.onDutyMarkedDone = onDocumentUpdated(
   {
     document: "tracker/state",
@@ -162,24 +162,60 @@ exports.onDutyMarkedDone = onDocumentUpdated(
     const before = event.data.before.data();
     const after  = event.data.after.data();
 
+    // Only fire when lastCompletedBy actually changes
     if (before.lastCompletedBy === after.lastCompletedBy) return;
     if (!after.lastCompletedBy) return;
 
+    // ── Throttle: only 1 notification per day ──────────────────────────────
+    const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+    const notifyDoc = await db.collection("tracker").doc("notifications").get();
+    if (notifyDoc.exists && notifyDoc.data().lastNotifiedDate === todayIST) {
+      console.log(`⏭ Notification already sent today (${todayIST}), skipping.`);
+      return;
+    }
+
+    // ── Build message ───────────────────────────────────────────────────────
     const completedBy = after.lastCompletedBy;
     const queue       = JSON.parse(after.queue || "[]");
-    const nextPerson  = queue.length > 0 ? queue[0].name : "—";
-    const nextDuty    = getDutyLabel(after.cycleCount ?? 0);
+    const nextPerson  = queue.length > 0 ? queue[0].name : null;
 
-    const message =
-      `✅ *${completedBy}* just completed their duty\\!\n\n` +
-      `🔜 *Next up: ${nextPerson}*\n` +
-      `📌 Task: *${nextDuty}*\n\n` +
-      `🏠 TNGO Roomies`;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toLocaleDateString("en-IN", {
+      weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Kolkata"
+    });
 
+    const message = nextPerson
+      ? `🗑️ *${completedBy}* cleared the dustbin today\!
+
+` +
+        `📅 *Tomorrow is ${nextPerson}'s turn*
+` +
+        `🗓 ${tomorrowStr}
+
+` +
+        `🏠 TNGO Roomies`
+      : `🗑️ *${completedBy}* cleared the dustbin today\!
+
+` +
+        `✅ Everyone has completed this cycle\!
+
+` +
+        `🏠 TNGO Roomies`;
+
+    // ── Send & record the date ──────────────────────────────────────────────
     await sendTelegram(
       TELEGRAM_BOT_TOKEN.value(),
       TELEGRAM_CHAT_ID.value(),
       message
     );
+
+    await db.collection("tracker").doc("notifications").set({
+      lastNotifiedDate: todayIST,
+      lastNotifiedBy:   completedBy,
+      sentAt:           new Date().toISOString()
+    });
+
+    console.log(`✅ Notification sent for ${completedBy}, date locked to ${todayIST}`);
   }
 );

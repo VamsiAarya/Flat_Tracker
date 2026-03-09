@@ -524,9 +524,25 @@
     qLastDone = JSON.parse(JSON.stringify(prev.lastDone));
     qHistory = JSON.parse(JSON.stringify(prev.history));
     pendingSkipped = new Set(prev.pendingSkipped || []);
+    _lastCompletedBy = '';
     document.getElementById('qUndoBtn').disabled = qUndoStack.length === 0;
     qToast('↩ Last move undone', 'tgreen');
-    qRender(); saveToFirebase();
+    qRender();
+    saveToFirebase();
+    // Release the notification lock so next Done can re-send
+    clearNotificationLock();
+  }
+
+  async function clearNotificationLock() {
+    if (!window._db) return;
+    try {
+      await window._db.collection('tracker').doc('notifications').set({
+        lastNotifiedDate: '',
+        lastNotifiedBy:   '',
+        sentAt:           ''
+      });
+      console.log('🔓 Notification lock cleared after undo');
+    } catch(e) { console.error('Failed to clear notification lock:', e); }
   }
 
   function qUpdateCard() {
