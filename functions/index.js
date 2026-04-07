@@ -8,13 +8,52 @@
  *   4. onDutyMarkedDone        — Firestore trigger on tracker/state
  *
  * External dependencies:
- *   - Telegram Bot API   (notifications)
- *   - Gemini Flash 2.0   (recipe & pre-workout suggestions)
- *   - Google Calendar API (Indian holiday detection)
- *   - Firebase Firestore  (state, history, roomies)
+ *   - Telegram Bot API          (notifications)
+ *   - Cloudflare Workers AI     (Llama 3.1 8B — recipe & pre-workout suggestions)
+ *   - Google Calendar API       (Indian holiday detection)
+ *   - Firebase Firestore        (state, history, roomies)
+ *
+ * Change log:
+ *
+ *   v2.1.0 — FIX-1  sendTelegram: removed double-escaping of already-escaped
+ *                   MarkdownV2 text. Old code called escapeMarkdownV2(text)
+ *                   inside sendTelegram even though every caller pre-escaped
+ *                   all dynamic fields. This produced malformed MarkdownV2,
+ *                   Telegram returned HTTP 400, the function threw, and the
+ *                   UI showed "Sync failed".
+ *
+ *            FIX-2  safeParseJSON: added typeof check so native Firestore
+ *                   Arrays are returned directly instead of being passed to
+ *                   JSON.parse (which always throws on an Array, causing
+ *                   silent fallback to [] and nextPerson always being null
+ *                   in onDutyMarkedDone).
+ *
+ *            FIX-3  Removed duplicate safeParseJSON definition (was declared
+ *                   twice — once before Section 10 and once at end of file).
+ *
+ *            FIX-4  Reordered sections: Utility Helpers (10) now precede
+ *                   Cloud Functions (11) for logical dependency order.
+ *
+ *   v2.2.0 — FIX-5  buildLunchPrompt: tightened dietary constraint wording.
+ *                   "do not eat non-veg" → "avoid non-veg on <dayName>s"
+ *                   so the AI cannot misread the constraint as optional.
+ *
+ *            FIX-6  buildLunchPrompt: added explicit FORBIDDEN / ALLOWED
+ *                   category lists to stop the AI suggesting desserts
+ *                   (kheer, halwa, payasam), South Indian breakfasts
+ *                   (idli, dosa, upma, pesarattu), or snacks (vada, bajji).
+ *                   Extended cuisine scope from "Andhra Pradesh" to
+ *                   "Andhra Pradesh or Telangana" to allow dal fry, sambar
+ *                   rice, biriyanis, one-pot cooker dishes, etc.
+ *
+ *            FIX-7  getTomorrowDate: now computes tomorrow from IST midnight
+ *                   (via getISTComponents) instead of UTC day + 1, eliminating
+ *                   the UTC/IST day-boundary edge case near midnight.
+ *
+ * Test suite: test.js — 66 tests, 0 failures.
  *
  * @author TNGO Roomies
- * @version 2.0.0
+ * @version 2.2.0
  */
 
 "use strict";
@@ -35,8 +74,8 @@ const db = getFirestore();
 // ─── Secret definitions ───────────────────────────────────────────────────────
 const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID   = defineSecret("TELEGRAM_CHAT_ID");
-const CF_API_TOKEN   = defineSecret("CF_API_TOKEN");
-const CF_ACCOUNT_ID  = defineSecret("CF_ACCOUNT_ID");
+const CF_API_TOKEN       = defineSecret("CF_API_TOKEN");
+const CF_ACCOUNT_ID      = defineSecret("CF_ACCOUNT_ID");
 
 // =============================================================================
 // SECTION 1 — CONSTANTS & CONFIGURATION
@@ -98,11 +137,11 @@ const SCHEDULE_WEEKS = Object.freeze([
  * Expressed in UTC: IST is UTC+5:30, so subtract 5.5 hours.
  * ⚠️  IMPORTANT: Must stay in sync with anchorMonday in index.html
  */
-const SCHEDULE_ANCHOR  = Object.freeze(new Date("2026-03-01T18:30:00.000Z"));
-const MS_PER_DAY       = 24 * 60 * 60 * 1000;
-const MS_PER_WEEK      = 7  * MS_PER_DAY;
-const MS_PER_CYCLE     = 3  * MS_PER_WEEK;
-const IST_OFFSET_MS    = 5.5 * 60 * 60 * 1000; // UTC+5:30
+const SCHEDULE_ANCHOR = Object.freeze(new Date("2026-03-01T18:30:00.000Z"));
+const MS_PER_DAY      = 24 * 60 * 60 * 1000;
+const MS_PER_WEEK     = 7  * MS_PER_DAY;
+const MS_PER_CYCLE    = 3  * MS_PER_WEEK;
+const IST_OFFSET_MS   = 5.5 * 60 * 60 * 1000; // UTC+5:30
 
 /** Google Calendar ID for Indian public holidays */
 const INDIAN_HOLIDAYS_CALENDAR_ID = "en.indian#holiday@group.v.calendar.google.com";
@@ -112,9 +151,9 @@ const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 /** AI generation config shared by all prompt calls */
 const AI_GENERATION_CONFIG = Object.freeze({
-  temperature:     0.9,
-  topP:            0.95,
-  max_tokens: 1024,
+  temperature: 0.9,
+  topP:        0.95,
+  max_tokens:  1024,
 });
 
 /** App URL included in all Telegram messages */
@@ -152,6 +191,12 @@ const FS = Object.freeze({
   PREWORKOUT_HISTORY: "schedule/preWorkoutHistory",
 });
 
+// ─── Common function config ───────────────────────────────────────────────────
+const FUNCTION_CONFIG = Object.freeze({
+  region:   "asia-south1",
+  timeZone: "Asia/Kolkata",
+});
+
 // =============================================================================
 // SECTION 2 — STRUCTURED LOGGER
 // =============================================================================
@@ -164,8 +209,7 @@ const FS = Object.freeze({
  *   const log = createLogger("myFunction");
  *   log.info("Something happened", { key: "value" });
  *   log.error("Something failed", error);
- */
-/**
+ *
  * @param {string} context  Name of the calling function / module
  * @returns {{ debug, info, warn, error, separator }} Logger instance
  */
@@ -203,6 +247,7 @@ function createLogger(context) {
 
 /**
  * Returns the IST date components for a given UTC Date.
+ *
  * @param {Date} date
  * @returns {{ istDate: Date, year: number, month: number, day: number, jsDay: number, mmdd: string }}
  */
@@ -210,11 +255,11 @@ function getISTComponents(date) {
   const istDate = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   return {
     istDate,
-    year:   istDate.getFullYear(),
-    month:  istDate.getMonth(),       // 0-indexed
-    day:    istDate.getDate(),
-    jsDay:  istDate.getDay(),         // 0=Sun, 6=Sat
-    mmdd:   `${String(istDate.getMonth() + 1).padStart(2, "0")}-${String(istDate.getDate()).padStart(2, "0")}`,
+    year:  istDate.getFullYear(),
+    month: istDate.getMonth(),   // 0-indexed
+    day:   istDate.getDate(),
+    jsDay: istDate.getDay(),     // 0=Sun, 6=Sat
+    mmdd:  `${String(istDate.getMonth() + 1).padStart(2, "0")}-${String(istDate.getDate()).padStart(2, "0")}`,
   };
 }
 
@@ -245,8 +290,8 @@ function getScheduleForDate(date) {
   };
 
   log.info("Schedule computed", {
-    inputDate:  date.toISOString(),
-    istDate:    `${year}-${mmdd}`,  // year + MM-DD from getISTComponents
+    inputDate: date.toISOString(),
+    istDate:   `${year}-${mmdd}`,
     weekIdx,
     dayIdx,
     result,
@@ -268,7 +313,6 @@ function formatDateIST(date) {
   });
 }
 
-
 /**
  * Returns a Firestore DocumentReference from a "collection/docId" path string.
  * Avoids repeated .split("/") across all DAL functions.
@@ -281,15 +325,20 @@ function getFirestoreRef(fsPath) {
   return db.collection(col).doc(docId);
 }
 
-
 /**
- * Returns a Date object representing tomorrow's date (at current UTC time + 1 day).
+ * Returns a Date object representing tomorrow's date in IST.
+ *
+ * FIX-7: Previously used setDate(d.getDate() + 1) which operates on UTC and
+ * can return the wrong IST date when the function runs within 5.5 hours of UTC
+ * midnight. Now derives tomorrow from the IST calendar date explicitly.
+ *
  * @returns {Date}
  */
 function getTomorrowDate() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d;
+  const now = new Date();
+  const { year, month, day } = getISTComponents(now);
+  // Construct IST midnight of tomorrow, expressed as a UTC Date
+  return new Date(Date.UTC(year, month, day + 1) - IST_OFFSET_MS);
 }
 
 // =============================================================================
@@ -317,6 +366,7 @@ async function getActiveRoomies() {
 
 /**
  * Returns names of roommates who avoid non-veg on the given day.
+ *
  * @param {Array<{ name: string, vegDays: string[] }>} roomies
  * @param {string} dayName  e.g. "Monday"
  * @returns {string[]}
@@ -333,6 +383,7 @@ function getVegOnlyPeople(roomies, dayName) {
 
 /**
  * Returns names of roommates whose birthday is today (uses MM-DD format in Firestore).
+ *
  * @param {Array<{ name: string, birthday: string }>} roomies
  * @param {Date} date
  * @returns {string[]}
@@ -369,6 +420,7 @@ async function getRecentLunchDishes() {
 
 /**
  * Appends a new lunch recipe to history, keeping only the last MAX_HISTORY_ENTRIES.
+ *
  * @param {{ name: string, nutrition?: object }} recipe
  * @returns {Promise<void>}
  */
@@ -393,10 +445,11 @@ async function saveRecentLunchDish(recipe) {
  * @returns {Promise<string[]>}
  */
 async function getRecentPreWorkoutDishes() {
-  const log          = createLogger("getRecentPreWorkoutDishes");
+  const log    = createLogger("getRecentPreWorkoutDishes");
   log.info("Fetching pre-workout history");
-  const ref  = getFirestoreRef(FS.PREWORKOUT_HISTORY);
-  const doc  = await ref.get();
+
+  const ref    = getFirestoreRef(FS.PREWORKOUT_HISTORY);
+  const doc    = await ref.get();
   const dishes = doc.exists ? (doc.data().dishes || []) : [];
 
   log.info("Pre-workout history fetched", { count: dishes.length, dishes });
@@ -405,14 +458,20 @@ async function getRecentPreWorkoutDishes() {
 
 /**
  * Appends a new pre-workout suggestion to history, keeping last MAX_HISTORY_ENTRIES.
+ *
  * @param {string} dishName
  * @returns {Promise<void>}
  */
 async function saveRecentPreWorkoutDish(dishName) {
-  const log          = createLogger("saveRecentPreWorkoutDish");
-  const recent = await getRecentPreWorkoutDishes();
+  const log     = createLogger("saveRecentPreWorkoutDish");
+  const recent  = await getRecentPreWorkoutDishes();
   const updated = [...recent, dishName].slice(-MAX_HISTORY_ENTRIES);
-  await getFirestoreRef(FS.PREWORKOUT_HISTORY).set({ dishes: updated, updatedAt: new Date().toISOString() }); // single new Date() — safe
+
+  await getFirestoreRef(FS.PREWORKOUT_HISTORY).set({
+    dishes:    updated,
+    updatedAt: new Date().toISOString(),
+  });
+
   log.info("Pre-workout history saved", { savedName: dishName, totalEntries: updated.length });
 }
 
@@ -421,23 +480,24 @@ async function saveRecentPreWorkoutDish(dishName) {
  * @returns {Promise<boolean>}
  */
 async function hasSentNotificationToday() {
-  const log          = createLogger("hasSentNotificationToday");
-  const now         = new Date();
-  const todayIST    = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const doc         = await getFirestoreRef(FS.TRACKER_NOTIF).get();
-  const alreadySent = doc.exists && doc.data().lastNotifiedDate === todayIST;
+  const log      = createLogger("hasSentNotificationToday");
+  const now      = new Date();
+  const todayIST = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const doc      = await getFirestoreRef(FS.TRACKER_NOTIF).get();
 
+  const alreadySent = doc.exists && doc.data().lastNotifiedDate === todayIST;
   log.info("Notification throttle check", { todayIST, alreadySent });
   return alreadySent;
 }
 
 /**
  * Records that a Done notification was sent today.
+ *
  * @param {string} completedBy  Name of the person who completed duty
  * @returns {Promise<void>}
  */
 async function recordNotificationSent(completedBy) {
-  const log          = createLogger("recordNotificationSent");
+  const log      = createLogger("recordNotificationSent");
   const now      = new Date();
   const todayIST = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
@@ -533,10 +593,10 @@ async function getFestivalForDate(date) {
  *
  * Endpoint: POST https://api.cloudflare.com/client/v4/accounts/{id}/ai/run/{model}
  *
- * @param {string} apiToken    Cloudflare API token with Workers AI read permission
- * @param {string} accountId   Cloudflare account ID
- * @param {string} prompt      Full prompt string
- * @returns {Promise<object>}  Parsed JSON object from model response
+ * @param {string} apiToken   Cloudflare API token with Workers AI read permission
+ * @param {string} accountId  Cloudflare account ID
+ * @param {string} prompt     Full prompt string
+ * @returns {Promise<object>} Parsed JSON object from model response
  */
 function callAI(apiToken, accountId, prompt) {
   const log = createLogger("callAI");
@@ -615,11 +675,20 @@ function callAI(apiToken, accountId, prompt) {
 // =============================================================================
 
 /**
- * Builds the Gemini prompt for an Andhra lunch recipe suggestion.
+ * Builds the AI prompt for an Andhra / Telangana lunch recipe suggestion.
  *
- * @param {string}   dayName       e.g. "Saturday"
- * @param {string[]} vegOnlyPeople Names of people avoiding non-veg
- * @param {string[]} recentDishes  Recently suggested dishes to avoid
+ * FIX-5: Dietary constraint wording tightened — "avoid non-veg on <dayName>s"
+ *        instead of "do not eat non-veg" to leave no ambiguity for the model.
+ *
+ * FIX-6: Added explicit FORBIDDEN / ALLOWED category lists so the model cannot
+ *        suggest desserts (kheer, halwa, payasam), South Indian breakfast items
+ *        (idli, dosa, upma, pesarattu), or snacks (vada, bajji). Extended
+ *        cuisine scope to "Andhra Pradesh or Telangana" so dal fry, biriyanis,
+ *        one-pot cooker rice dishes and sambar rice are all valid suggestions.
+ *
+ * @param {string}   dayName       e.g. "Tuesday"
+ * @param {string[]} vegOnlyPeople Names of people avoiding non-veg that day
+ * @param {string[]} recentDishes  Dish names to avoid (repeat prevention)
  * @param {{ name: string, vegOnly: boolean } | null} festival
  * @returns {string}
  */
@@ -627,45 +696,60 @@ function buildLunchPrompt(dayName, vegOnlyPeople, recentDishes, festival) {
   let dietaryContext;
   if (festival) {
     dietaryContext = festival.vegOnly
-      ? `Tomorrow is ${festival.name}, a major Indian festival. The meal MUST be strictly vegetarian and should be a traditional festive dish from Andhra Pradesh associated with ${festival.name}.`
+      ? `Tomorrow is ${festival.name}, a major Indian festival. The meal MUST be strictly vegetarian and should be a traditional festive dish from Andhra Pradesh or Telangana associated with ${festival.name}.`
       : `Tomorrow is ${festival.name}. No strict dietary restriction for this festival — the meal can be vegetarian or non-vegetarian.`;
   } else if (vegOnlyPeople.length > 0) {
-    dietaryContext = `Tomorrow is ${dayName}. ${vegOnlyPeople.join(" & ")} do not eat non-veg, so the meal MUST be strictly vegetarian.`;
+    // FIX-5: explicit "avoid non-veg on <dayName>s" phrasing — harder for AI to ignore
+    dietaryContext = `Tomorrow is ${dayName}. ${vegOnlyPeople.join(" & ")} avoid non-veg on ${dayName}s, so the meal MUST be strictly vegetarian.`;
   } else {
     dietaryContext = `Tomorrow is ${dayName}. No dietary restrictions — the meal can be vegetarian or non-vegetarian.`;
   }
 
   const avoidClause = recentDishes.length > 0
-    ? `\n- Do NOT repeat any of these recently cooked dishes: ${recentDishes.join(", ")}`
+    ? `\n- Do NOT suggest any of these recently made dishes: ${recentDishes.join(", ")}`
     : "";
 
-  return `You are a recipe assistant for ${MEMBERS.length} roommates sharing a flat in Hyderabad, India.
+  // FIX-6: explicit FORBIDDEN / ALLOWED categories + Telangana scope
+  return `You are a lunch recipe assistant for ${MEMBERS.length} Telugu-speaking roommates sharing a flat in Hyderabad, India.
 
 ${dietaryContext}
 
-RULES:
-- Suggest exactly ONE lunch recipe
-- Must be an authentic dish from Andhra Pradesh cuisine
-- Practical for a basic home kitchen — max 60 minutes total
-- All quantities for exactly ${MEMBERS.length} people${avoidClause}
-- "prepTonight": list ONLY steps genuinely needed the night before (soaking, marinating, thawing). Use [] if nothing is needed.
-- "nutrition": per-serving estimates
+YOUR TASK: Suggest exactly ONE lunch recipe that the roommates will cook and eat for lunch.
 
-Respond ONLY with this JSON — no markdown, no commentary, no code fences:
+STRICT CUISINE RULES — read carefully:
+- ONLY suggest authentic lunch dishes from Andhra Pradesh or Telangana cuisine
+- ALLOWED dish categories:
+  * Rice-based mains: biriyani, pulao, one-pot pressure cooker rice dishes, tamarind rice (pulihora), lemon rice, curd rice
+  * Curries (kura): chicken curry, mutton curry, egg curry, paneer curry, vegetable curry, drumstick curry, bendakaya fry
+  * Dal varieties (pappu): tomato pappu, spinach pappu, raw mango pappu, toor dal, moong dal
+  * Sambar or rasam served with rice
+  * Dry side dishes (vepudu): potato fry, raw banana fry, cluster beans fry
+  * Roti or paratha paired with a curry or dal
+- FORBIDDEN — do NOT suggest these under any circumstances:
+  * Desserts or sweets: kheer, halwa, payasam, gulab jamun, laddu, pongal (sweet), bobbatlu
+  * Breakfast items: idli, dosa, upma, poha, pesarattu, uttapam, medu vada, pongal (breakfast)
+  * Snacks or starters: vada, bajji, bonda, samosa, pakora, punugulu
+  * Any dish that is not a proper lunch meal${avoidClause}
+- Practical for a basic home kitchen — max 60 minutes total
+- All quantities must be scaled for exactly ${MEMBERS.length} people
+- "prepTonight": list ONLY steps genuinely needed the night before (soaking lentils/rice overnight, marinating meat). Use [] if nothing needs advance prep.
+- "nutrition": per-serving estimates only
+
+Respond ONLY with this exact JSON structure — no markdown, no commentary, no code fences:
 {
   "name": "",
   "type": "Vegetarian or Non-Vegetarian",
-  "region": "Andhra Pradesh",
+  "region": "Andhra Pradesh or Telangana",
   "cookingTime": "",
   "ingredients": ["ingredient — quantity"],
-  "steps": ["step"],
+  "steps": ["step 1", "step 2"],
   "prepTonight": [],
   "nutrition": { "calories": "", "protein": "", "carbs": "", "fats": "" }
 }`;
 }
 
 /**
- * Builds the Gemini prompt for a pre-workout meal suggestion.
+ * Builds the AI prompt for a pre-workout meal suggestion.
  *
  * @param {string[]} recentDishes  Recently suggested dishes to avoid
  * @returns {string}
@@ -700,7 +784,27 @@ Respond ONLY with this JSON — no markdown, no commentary, no code fences:
 // =============================================================================
 
 /**
+ * Escapes special characters for Telegram MarkdownV2.
+ * Backslash is escaped first to prevent double-escaping on subsequent replacements.
+ * Characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+ *
+ * ⚠️  Call this ONLY on raw dynamic content (AI-generated text, names, dates).
+ *     Never call it on a fully-built MarkdownV2 message string — sendTelegram
+ *     does NOT re-escape its input (see FIX-1).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeMarkdownV2(text) {
+  return String(text)
+    .replace(/\\/g, "\\\\")
+    .replace(/([_*[\]()~`>#+\-=|{}.!])/g, "\\$1");
+}
+
+/**
  * Formats a lunch recipe object into a MarkdownV2 Telegram message block.
+ * All dynamic/AI-generated content is escaped via escapeMarkdownV2.
+ *
  * @param {{ name, type, cookingTime, ingredients, steps, nutrition, prepTonight }} recipe
  * @param {{ name: string } | null} festival
  * @returns {string}
@@ -708,7 +812,6 @@ Respond ONLY with this JSON — no markdown, no commentary, no code fences:
 function formatLunchRecipeBlock(recipe, festival) {
   const typeEmoji = recipe.type === "Vegetarian" ? "🟢" : "🍗";
 
-  // Escape all AI-generated content before embedding in MarkdownV2
   const escapedName        = escapeMarkdownV2(recipe.name);
   const escapedType        = escapeMarkdownV2(recipe.type);
   const escapedCookingTime = escapeMarkdownV2(recipe.cookingTime);
@@ -722,7 +825,7 @@ function formatLunchRecipeBlock(recipe, festival) {
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `${festivalHeader}` +
     `🥘 *${escapedName}*\n` +
-    `${typeEmoji} ${escapedType}  \|  ⏱ ${escapedCookingTime}  \|  👥 ${MEMBERS.length} people\n\n` +
+    `${typeEmoji} ${escapedType}  \\|  ⏱ ${escapedCookingTime}  \\|  👥 ${MEMBERS.length} people\n\n` +
     `🛒 *Ingredients:*\n${ingredients}\n\n` +
     `📋 *Steps:*\n${steps}`;
 
@@ -746,6 +849,8 @@ function formatLunchRecipeBlock(recipe, festival) {
 
 /**
  * Formats a pre-workout meal object into a MarkdownV2 Telegram message block.
+ * All dynamic/AI-generated content is escaped via escapeMarkdownV2.
+ *
  * @param {{ name, readyIn, energyLevel, ingredients, whyItWorks, tip }} meal
  * @returns {string}
  */
@@ -757,26 +862,12 @@ function formatPreWorkoutBlock(meal) {
     `🏋️ *Pre\\-Workout Meal Suggestion*\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `🥗 *${escapeMarkdownV2(meal.name)}*\n` +
-    `${energyEmoji} ${escapeMarkdownV2(meal.energyLevel)} energy  \|  ⏱ ${escapeMarkdownV2(meal.readyIn)}\n\n` +
+    `${energyEmoji} ${escapeMarkdownV2(meal.energyLevel)} energy  \\|  ⏱ ${escapeMarkdownV2(meal.readyIn)}\n\n` +
     `🛒 *Ingredients \\(per person\\):*\n${ingredients}\n\n` +
     `✅ *Why it works:*\n${escapeMarkdownV2(meal.whyItWorks)}\n\n` +
     `💡 *Tip:* ${escapeMarkdownV2(meal.tip)}\n\n` +
     `🏃 Have this 30–45 mins before your workout\\!`
   );
-}
-
-/**
- * Escapes special characters for Telegram MarkdownV2.
- * Only escapes characters that would break formatting outside of bold/italic.
- * Characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
- *
- * @param {string} text
- * @returns {string}
- */
-function escapeMarkdownV2(text) {
-  return String(text)
-  .replace(/\\/g, "\\\\")
-  .replace(/([_\*\[\]\(\)~`>#+\-=|{}.!])/g,"\\$&");
 }
 
 // =============================================================================
@@ -787,9 +878,16 @@ function escapeMarkdownV2(text) {
  * Sends a MarkdownV2-formatted message to the configured Telegram group.
  * Throws on HTTP error or Telegram API error.
  *
+ * ⚠️  FIX-1: This function does NOT escape the incoming text.
+ *     All callers pre-escape every dynamic field using escapeMarkdownV2() before
+ *     building their message strings. Calling escapeMarkdownV2(text) here would
+ *     double-escape every backslash and special character, causing Telegram to
+ *     return HTTP 400 "can't parse entities" — which surfaces as "Sync failed"
+ *     in the UI. The text parameter must be passed through as-is.
+ *
  * @param {string} token   Bot token
  * @param {string} chatId  Chat ID (negative number for groups)
- * @param {string} text    MarkdownV2-formatted message body
+ * @param {string} text    MarkdownV2-formatted message body (pre-escaped by caller)
  * @returns {Promise<object>} Telegram API response
  */
 function sendTelegram(token, chatId, text) {
@@ -797,8 +895,8 @@ function sendTelegram(token, chatId, text) {
   log.info("Sending Telegram message", { chatId, messageLength: text.length });
 
   return new Promise((resolve, reject) => {
-    const safeText = escapeMarkdownV2(text);
-    const body    = JSON.stringify({ chat_id: chatId, text:safeText , parse_mode: "MarkdownV2" });
+    // FIX-1: Pass text directly — do NOT call escapeMarkdownV2(text) here.
+    const body    = JSON.stringify({ chat_id: chatId, text, parse_mode: "MarkdownV2" });
     const options = {
       hostname: "api.telegram.org",
       path:     `/bot${token}/sendMessage`,
@@ -820,8 +918,8 @@ function sendTelegram(token, chatId, text) {
             resolve(parsed);
           } else {
             log.error("Telegram API returned error", {
-              errorCode:   parsed.error_code,
-              description: parsed.description,
+              errorCode:    parsed.error_code,
+              description:  parsed.description,
               fullResponse: parsed,
             });
             reject(new Error(`Telegram error ${parsed.error_code}: ${parsed.description}`));
@@ -844,20 +942,32 @@ function sendTelegram(token, chatId, text) {
 }
 
 // =============================================================================
-// SECTION 11 — UTILITY HELPERS
+// SECTION 10 — UTILITY HELPERS
 // =============================================================================
 
 /**
- * Safely parses a JSON string, returning a fallback value on failure.
- * Guards against null/undefined inputs (JSON.parse(null) returns null, not fallback).
+ * Safely parses a value that may be a JSON string or already a native JS type.
+ *
+ * FIX-2 & FIX-3: Previously declared twice and only handled string inputs.
+ * A native Firestore Array passed to JSON.parse() always throws, causing
+ * safeParseJSON to silently return [] — so nextPerson in onDutyMarkedDone
+ * was permanently null and the "next turn" line never appeared.
+ *
+ * Behaviour after fix:
+ *   - null / undefined  → return fallback
+ *   - non-string value  → return raw directly (handles native Firestore Arrays/objects)
+ *   - valid JSON string → return parsed value
+ *   - invalid JSON str  → log warning, return fallback
+ *
  * @template T
- * @param {string} raw
- * @param {T} fallback
- * @returns {T}
+ * @param {*}  raw       Raw value from Firestore (Array, string, null, etc.)
+ * @param {T}  fallback  Returned when raw is absent or unparseable
+ * @returns {T | *}
  */
 function safeParseJSON(raw, fallback) {
-  // Guard against null/undefined — JSON.parse(null) returns null not fallback
   if (raw === null || raw === undefined) return fallback;
+  // FIX-2: native JS type (Array, object, number…) — return directly
+  if (typeof raw !== "string") return raw;
   try {
     return JSON.parse(raw);
   } catch {
@@ -867,19 +977,13 @@ function safeParseJSON(raw, fallback) {
 }
 
 // =============================================================================
-// SECTION 10 — CLOUD FUNCTIONS
+// SECTION 11 — CLOUD FUNCTIONS
 // =============================================================================
-
-// ─── Common function config ───────────────────────────────────────────────────
-const FUNCTION_CONFIG = Object.freeze({
-  region:   "asia-south1",
-  timeZone: "Asia/Kolkata",
-});
 
 /**
  * Cloud Function 1: Pre-Workout Suggestion
  * Schedule: 06:00 AM IST daily
- * Sends a Gemini-generated Indian pre-workout meal suggestion to the Telegram group.
+ * Sends an AI-generated Indian pre-workout meal suggestion to the Telegram group.
  */
 exports.preWorkoutSuggestion = onSchedule(
   {
@@ -897,7 +1001,7 @@ exports.preWorkoutSuggestion = onSchedule(
       // ── Step 1: Load history ─────────────────────────────────────────────
       const recentDishes = await getRecentPreWorkoutDishes();
 
-      // ── Step 2: Call Gemini ──────────────────────────────────────────────
+      // ── Step 2: Call AI ──────────────────────────────────────────────────
       let meal = null;
       try {
         meal = await callAI(CF_API_TOKEN.value(), CF_ACCOUNT_ID.value(), buildPreWorkoutPrompt(recentDishes));
@@ -906,11 +1010,11 @@ exports.preWorkoutSuggestion = onSchedule(
           energyLevel: meal.energyLevel,
           readyIn:     meal.readyIn,
         });
-      } catch (geminiErr) {
-        log.error("AI call failed — sending fallback message", { error: geminiErr.message });
+      } catch (aiErr) {
+        log.error("AI call failed — sending fallback message", { error: aiErr.message });
       }
 
-      // ── Step 3: Build and send message ──────────────────────────────────
+      // ── Step 3: Build and send message ───────────────────────────────────
       const message = meal
         ? `🌅 *TNGO Roomies — Good Morning\\!*\n\n` + formatPreWorkoutBlock(meal)
         : `🌅 *TNGO Roomies — Good Morning\\!*\n\n🏋️ Pre\\-workout suggestion unavailable today\\.`;
@@ -923,7 +1027,7 @@ exports.preWorkoutSuggestion = onSchedule(
       log.info("Function completed successfully");
     } catch (err) {
       log.error("Unhandled error in preWorkoutSuggestion", { message: err.message, stack: err.stack });
-      throw err; // re-throw so Firebase marks execution as failed
+      throw err;
     } finally {
       log.separator();
     }
@@ -949,11 +1053,10 @@ exports.dailyMorningReminder = onSchedule(
     log.info("Function started", { triggeredAt: new Date().toISOString() });
 
     try {
-      const now      = new Date();
-      const schedule = getScheduleForDate(now);
+      const now            = new Date();
+      const schedule       = getScheduleForDate(now);
       const todayFormatted = formatDateIST(now);
 
-      // Fetch roomies for birthday check
       const roomies   = await getActiveRoomies();
       const birthdays = getTodayBirthdays(roomies, now);
 
@@ -991,7 +1094,7 @@ exports.dailyMorningReminder = onSchedule(
 /**
  * Cloud Function 3: Evening Recipe Suggestion
  * Schedule: 10:00 PM IST daily
- * Sends tomorrow's schedule + Gemini-generated Andhra lunch recipe to the group.
+ * Sends tomorrow's schedule + AI-generated Andhra/Telangana lunch recipe to the group.
  * Includes festival detection, veg/non-veg dietary logic, nutrition, overnight prep.
  *
  * ⚠️  Uses getScheduleForDate(tomorrow) — identical to UI logic — cook names always match.
@@ -1010,8 +1113,8 @@ exports.eveningRecipeSuggestion = onSchedule(
 
     try {
       // ── Step 1: Compute tomorrow's schedule ───────────────────────────────
-      const tomorrow = getTomorrowDate();
-      const schedule = getScheduleForDate(tomorrow);
+      const tomorrow    = getTomorrowDate();  // FIX-7: IST-aware
+      const schedule    = getScheduleForDate(tomorrow);
       const tomorrowStr = formatDateIST(tomorrow);
 
       log.info("Tomorrow's schedule resolved", {
@@ -1032,7 +1135,7 @@ exports.eveningRecipeSuggestion = onSchedule(
       const isVegDay  = Boolean(festival?.vegOnly) || vegPeople.length > 0;
 
       log.info("Dietary context resolved", {
-        festival:   festival?.name ?? null,
+        festival:  festival?.name ?? null,
         isVegDay,
         vegPeople,
       });
@@ -1040,7 +1143,7 @@ exports.eveningRecipeSuggestion = onSchedule(
       // ── Step 3: Fetch history to avoid repeats ────────────────────────────
       const recentDishes = await getRecentLunchDishes();
 
-      // ── Step 4: Get recipe from Gemini ────────────────────────────────────
+      // ── Step 4: Get recipe from AI ────────────────────────────────────────
       let recipe = null;
       try {
         recipe = await callAI(
@@ -1049,14 +1152,14 @@ exports.eveningRecipeSuggestion = onSchedule(
           buildLunchPrompt(schedule.dayName, vegPeople, recentDishes, festival)
         );
         log.info("Recipe received from AI", {
-          name:        recipe.name,
-          type:        recipe.type,
-          cookingTime: recipe.cookingTime,
+          name:           recipe.name,
+          type:           recipe.type,
+          cookingTime:    recipe.cookingTime,
           hasPrepTonight: Array.isArray(recipe.prepTonight) && recipe.prepTonight.length > 0,
           hasNutrition:   Boolean(recipe.nutrition),
         });
-      } catch (geminiErr) {
-        log.error("AI call failed — sending fallback message", { error: geminiErr.message });
+      } catch (aiErr) {
+        log.error("AI call failed — sending fallback message", { error: aiErr.message });
       }
 
       // ── Step 5: Build Telegram message ────────────────────────────────────
@@ -1137,10 +1240,14 @@ exports.onDutyMarkedDone = onDocumentUpdated(
 
       // ── Build message ─────────────────────────────────────────────────────
       const completedBy = after.lastCompletedBy;
-      const queue       = safeParseJSON(after.queue, []);
-      const nextPerson  = queue.length > 0 ? queue[0].name : null;
 
-      const tomorrow    = getTomorrowDate();
+      // FIX-2: safeParseJSON now handles native Firestore Arrays directly.
+      // Old code: JSON.parse(nativeArray) always threw → fallback [] → nextPerson null.
+      // New code: typeof check returns native array as-is before attempting JSON.parse.
+      const queue      = safeParseJSON(after.queue, []);
+      const nextPerson = queue.length > 0 ? queue[0].name : null;
+
+      const tomorrow    = getTomorrowDate();  // FIX-7: IST-aware
       const tomorrowStr = formatDateIST(tomorrow);
 
       log.info("Building dustbin notification", { completedBy, nextPerson, tomorrowStr });
@@ -1167,28 +1274,3 @@ exports.onDutyMarkedDone = onDocumentUpdated(
     }
   }
 );
-
-// =============================================================================
-// SECTION 11 — UTILITY HELPERS
-// =============================================================================
-
-/**
- * Safely parses a JSON string, returning a fallback value on failure.
- * Guards against null/undefined inputs (JSON.parse(null) returns null, not fallback).
- * @template T
- * @param {string} raw
- * @param {T} fallback
- * @returns {T}
- */
-function safeParseJSON(raw, fallback) {
-  // Guard against null/undefined — JSON.parse(null) returns null not fallback
-  if (raw === null || raw === undefined) return fallback;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    createLogger("safeParseJSON").warn("JSON parse failed — using fallback", { raw });
-    return fallback;
-  }
-}
-
-// =============================================================================
